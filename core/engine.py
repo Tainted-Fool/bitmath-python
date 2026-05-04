@@ -7,7 +7,7 @@ take plain Python values and return plain Python values.
 
 C-portability contract
 ~~~~~~~~~~~~~~~~~~~~~~
-Every function in this module has a direct C equivalent.  The mapping is:
+Every function in this module has a direct C equivalent. The mapping is:
 
   Python function          C function (future)
   ─────────────────────────────────────────────
@@ -65,6 +65,11 @@ class FormatSpec:
     c_array:     bool            = False   # { 0xNN, ... }
     show_all:    bool            = False   # print all bases
     width:       Optional[int]   = None    # explicit bit-width override
+    signed:       bool           = False   # two's-complement signed decimal
+    ascii_decode: bool           = False   # integer -> ASCII string
+    ascii_encode: bool           = False   # ASCII string -> hex integer
+    verbose:      bool           = False   # show parse/eval steps on stderr
+
 
 @dataclass
 class EvalResult:
@@ -72,6 +77,18 @@ class EvalResult:
     unsigned:    int             # masked unsigned value
     width:       int             # inferred or overridden bit-width (8/16/32/64/...)
     inferred_base: Base          # base detected from first literal
+
+
+@dataclass
+class VerboseInfo:
+    """Intermediate parsing/eval steps surfaced by --verbose.
+    C equivalent: bm_verbose_info struct printed to stderr by bm_process().
+    """
+    py_expr:   str    # expression after literal translation
+    width:     int    # inferred bit-width
+    mode:      str    # output mode string (x/d/o/b/grouped/ascii/...)
+    raw_int:   int    # raw Python result before masking
+    unsigned:  int    # value after masking
 
 
 # ── literal translation ───────────────────────────────────────────────────────
@@ -131,7 +148,7 @@ def evaluate(expr: str) -> int:
 # C note: bm_infer_width() iterates the token stream from the parser.
 
 _RE_LITERALS = re.compile(
-    r'0[xX][0-9a-fA-F]+'   # hex
+    r'0[xX][0-9a-fA-F]+'    # hex
     r'|0[bB][01]+'          # binary
     r'|0[oO][0-7]+'         # octal
     r'|\b\d+\b'             # decimal
@@ -175,7 +192,7 @@ def mask_unsigned(value: int, width: int) -> int:
 # Operators and whitespace are skipped.
 
 _RE_FIRST_LITERAL = re.compile(
-    r'0[xX][0-9a-fA-F]+'   # hex   (check before plain int)
+    r'0[xX][0-9a-fA-F]+'    # hex   (check before plain int)
     r'|0[bB][01]+'          # binary (0b prefix — post-translation)
     r'|0[oO][0-7]+'         # octal  (0o prefix — post-translation)
     r'|[01]+[bB]'           # binary (original b-suffix, pre-translation)
@@ -293,81 +310,212 @@ def fmt_c_array(n: int, width: int, endian: Endian, upper: bool = False) -> str:
 
 # ── "show all" formatter ──────────────────────────────────────────────────────
 
-def fmt_all(result: EvalResult, upper: bool = False) -> dict[str, str]:
+def fmt_all(result: EvalResult, upper: bool = False, signed: bool = False) -> dict[str, str]:
     """
     Return an ordered dict of all representations.
     Used by --all / -a mode.
     """
     n, w = result.unsigned, result.width
-    return {
+    rows = {
         'hex':    fmt_hex(n, upper=upper),
         'dec':    fmt_dec(n),
         'oct':    fmt_oct(n),
         'bin':    fmt_bin(n, spaces=True),
         'bytes':  fmt_grouped(n, w, GroupMode.BYTE, 1, Endian.BIG, spaces=True, upper=upper),
+        'ascii':  fmt_ascii_decode(n, w),
         'width':  f'{w}-bit',
     }
+    if signed:
+        rows['signed'] = fmt_signed(n, w)
+    return rows
+
+
+# ── signed formatter ─────────────────────────────────────────────────────────
+ 
+def fmt_signed(n: int, width: int) -> str:
+    """
+    Interpret `n` as a two's-complement signed integer of `width` bits.
+    C equivalent: bm_fmt_signed() using (int64_t) cast or equivalent.
+ 
+      0xff  (8-bit)  -> -1
+      0x80  (8-bit)  -> -128
+      0x7f  (8-bit)  -> 127
+    """
+    msb_mask = 1 << (width - 1)
+    if n & msb_mask:
+        return str(n - (1 << width))
+    return str(n)
+ 
+ 
+# ── ASCII formatters ──────────────────────────────────────────────────────────
+ 
+def fmt_ascii_decode(n: int, width: int) -> str:
+    """
+    Decode an integer to its ASCII string representation.
+    Non-printable bytes are rendered as dots (like xxd / strings behaviour).
+    C equivalent: bm_fmt_ascii_decode() iterating bytes MSB-first.
+ 
+      0x41414141 -> AAAA
+      0x68656c6c6f -> hello
+      0x4865 -> He
+    """
+    byte_len = max(1, width // 8)
+    hex_str = format(n, f'0{byte_len * 2}x')
+    out = []
+    for i in range(0, len(hex_str), 2):
+        byte_val = int(hex_str[i:i+2], 16)
+        out.append(chr(byte_val) if 32 <= byte_val <= 126 else '.')
+    return ''.join(out)
+ 
+def ascii_encode(text: str) -> int:
+    """
+    Encode an ASCII string to its integer representation (big-endian).
+    C equivalent: bm_ascii_encode() shifting bytes into a uint64_t MSB-first.
+ 
+      "AAAA"  -> 0x41414141
+      "hello" -> 0x68656c6c6f
+    """
+    return int.from_bytes(text.encode('utf-8'), byteorder='big')
+ 
+ 
+# ── verbose info ──────────────────────────────────────────────────────────────
+ 
+def fmt_verbose(info: VerboseInfo) -> str:
+    """
+    Format VerboseInfo as a multi-line diagnostic block.
+    Returned as a string — the CLI layer prints it to stderr.
+    """
+    lines = [
+        f'[+] Parsed Expr  : {info.py_expr}',
+        f'[+] Width        : {info.width} bits',
+        f'[+] Output Mode  : {info.mode}',
+        f'[+] Raw Int      : {info.raw_int}',
+        f'[+] Unsigned Val : {info.unsigned}',
+        '-' * 44,
+    ]
+    return '\n'.join(lines)
 
 
 # ── main entry point for the CLI layer ───────────────────────────────────────
-
-def process(expr: str, spec: FormatSpec) -> str:
+def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
     """
     Evaluate `expr` and format the result according to `spec`.
-    Returns a single string ready to print.
+ 
+    Returns a tuple of (output, verbose_block):
+      - output:       the formatted result string, ready to print to stdout
+      - verbose_block: a diagnostic string to print to stderr, or None
+ 
     Raises ValueError on bad input.
-
-    This is the only function the CLI layer needs to call.
-    C equivalent: bm_process(const char *expr, const BmFormatSpec *spec, char *out, size_t outlen)
+ 
+    C equivalent:
+      bm_process(const char *expr, const BmFormatSpec *spec,
+                 char *out, size_t outlen,
+                 char *verbose_out, size_t verbose_outlen)
     """
-    py_expr   = translate_expr(expr)
-    raw       = evaluate(expr)
-    width     = infer_width(py_expr, raw, spec.width)
-    unsigned  = mask_unsigned(raw, width)
-    inferred  = detect_infix_base(expr)
-    base      = spec.base if spec.base is not None else inferred
-
-    result = EvalResult(unsigned=unsigned, width=width, inferred_base=inferred)
-
-    # --all overrides everything else
+    # ── ASCII encode is a completely separate path ────────────────────────────
+    # Input is a string, not a numeric expression.
+    if spec.ascii_encode:
+        raw      = ascii_encode(expr)
+        width    = spec.width or max(8, len(expr) * 8)
+        unsigned = mask_unsigned(raw, width)
+        mode_str = spec.base.name.lower() if spec.base else 'x'
+        output_base = spec.base or Base.HEX
+ 
+        verbose = None
+        if spec.verbose:
+            info = VerboseInfo(
+                py_expr=f'encode({expr!r})',
+                width=width, mode=mode_str,
+                raw_int=raw, unsigned=unsigned,
+            )
+            verbose = fmt_verbose(info)
+ 
+        prefix = not spec.no_prefix
+        if output_base == Base.HEX:
+            return fmt_hex(unsigned, upper=spec.upper, prefix=prefix), verbose
+        if output_base == Base.DEC:
+            return fmt_dec(unsigned), verbose
+        return fmt_hex(unsigned, upper=spec.upper, prefix=prefix), verbose
+ 
+    # ── normal numeric expression path ───────────────────────────────────────
+    py_expr  = translate_expr(expr)
+    raw      = evaluate(expr)
+ 
+    # Width: for ascii_decode without explicit --width, round to nearest byte
+    if spec.ascii_decode and spec.width is None:
+        width = max(8, (raw.bit_length() + 7) // 8 * 8)
+    else:
+        width = infer_width(py_expr, raw, spec.width)
+ 
+    unsigned = mask_unsigned(raw, width)
+    inferred = detect_infix_base(expr)
+    base     = spec.base if spec.base is not None else inferred
+    result   = EvalResult(unsigned=unsigned, width=width, inferred_base=inferred)
+ 
+    # Determine mode label for verbose output
+    if spec.ascii_decode:          mode_str = 'ascii-decode'
+    elif spec.show_all:            mode_str = 'all'
+    elif spec.escape:              mode_str = 'escape'
+    elif spec.c_array:             mode_str = 'c-array'
+    elif spec.group_mode != GroupMode.NONE: mode_str = f'grouped-{spec.group_mode.name.lower()}'
+    elif spec.signed:              mode_str = 'signed-dec'
+    else:                          mode_str = base.name.lower()
+ 
+    verbose = None
+    if spec.verbose:
+        info = VerboseInfo(
+            py_expr=py_expr, width=width, mode=mode_str,
+            raw_int=raw, unsigned=unsigned,
+        )
+        verbose = fmt_verbose(info)
+ 
+    # ── ascii decode ─────────────────────────────────────────────────────────
+    if spec.ascii_decode:
+        return fmt_ascii_decode(unsigned, width), verbose
+ 
+    # ── show all ─────────────────────────────────────────────────────────────
     if spec.show_all:
-        rows = fmt_all(result, upper=spec.upper)
+        rows = fmt_all(result, upper=spec.upper, signed=spec.signed)
         width_val = rows.pop('width')
         col = max(len(k) for k in rows)
         lines = [f"  {k:<{col}}  {v}" for k, v in rows.items()]
         lines.append(f"  {'width':<{col}}  {width_val}")
-        return '\n'.join(lines)
-
-    # escape / c-array modes — endian applies, but no visual grouping
+        return '\n'.join(lines), verbose
+ 
+    # ── escape / c-array ─────────────────────────────────────────────────────
     if spec.escape:
-        return fmt_escape(unsigned, width, spec.endian, spec.upper)
+        return fmt_escape(unsigned, width, spec.endian, spec.upper), verbose
     if spec.c_array:
-        return fmt_c_array(unsigned, width, spec.endian, spec.upper)
-
-    # grouped hex modes (-W / -w)
+        return fmt_c_array(unsigned, width, spec.endian, spec.upper), verbose
+ 
+    # ── grouped hex (-W / -w) ─────────────────────────────────────────────────
     if spec.group_mode != GroupMode.NONE:
         return fmt_grouped(
             unsigned, width, spec.group_mode, spec.group_n,
             spec.endian, spec.spaces, spec.upper,
-        )
-
-    # -e little alone → byte-grouped with default group_n
+        ), verbose
+ 
+    # ── -e little alone → byte-grouped ───────────────────────────────────────
     if spec.endian == Endian.LITTLE and spec.group_mode == GroupMode.NONE:
         return fmt_grouped(
             unsigned, width, GroupMode.BYTE, spec.group_n,
             spec.endian, spec.spaces, spec.upper,
-        )
-
-
-    # scalar modes
+        ), verbose
+ 
+    # ── scalar output ─────────────────────────────────────────────────────────
     prefix = not spec.no_prefix
+    if spec.signed and base == Base.DEC:
+        return fmt_signed(unsigned, width), verbose
     if base == Base.HEX:
-        return fmt_hex(unsigned, upper=spec.upper, prefix=prefix)
+        return fmt_hex(unsigned, upper=spec.upper, prefix=prefix), verbose
     if base == Base.DEC:
-        return fmt_dec(unsigned)
+        # Apply signed if requested even without explicit -d
+        if spec.signed:
+            return fmt_signed(unsigned, width), verbose
+        return fmt_dec(unsigned), verbose
     if base == Base.OCT:
-        return fmt_oct(unsigned, prefix=prefix)
+        return fmt_oct(unsigned, prefix=prefix), verbose
     if base == Base.BIN:
-        return fmt_bin(unsigned, spaces=spec.spaces)
-
-    return fmt_hex(unsigned, upper=spec.upper, prefix=prefix)  # fallback
+        return fmt_bin(unsigned, spaces=spec.spaces), verbose
+ 
+    return fmt_hex(unsigned, upper=spec.upper, prefix=prefix), verbose  # fallback

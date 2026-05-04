@@ -10,9 +10,9 @@ import pytest
 from core.engine import (
     Base, GroupMode, Endian, FormatSpec,
     translate_expr, evaluate, infer_width, mask_unsigned,
-    detect_infix_base,
-    fmt_hex, fmt_dec, fmt_oct, fmt_bin,
-    fmt_grouped, fmt_escape, fmt_c_array, fmt_all,
+    detect_infix_base, ascii_encode,
+    fmt_hex, fmt_dec, fmt_oct, fmt_bin, fmt_signed,
+    fmt_ascii_decode, fmt_grouped, fmt_escape, fmt_c_array, fmt_all,
     process,
 )
 
@@ -232,81 +232,160 @@ def spec(**kwargs) -> FormatSpec:
         setattr(s, k, v)
     return s
 
+def p(expr, **kwargs):
+    """Helper: call process() and return just the output string."""
+    out, _ = process(expr, spec(**kwargs))
+    return out
+
 class TestProcess:
     # auto-infer
     def test_hex_in_hex_out(self):
-        assert process("0xc6 ^ 0x79", spec()) == "0xbf"
+        assert p("0xc6 ^ 0x79", ) == "0xbf"
     def test_dec_in_dec_out(self):
-        assert process("198 | 121", spec()) == "255"
+        assert p("198 | 121", ) == "255"
     def test_oct_in_oct_out(self):
-        assert process("16o & 7o", spec()) == "0o6"
+        assert p("16o & 7o", ) == "0o6"
     def test_bin_in_bin_out(self):
-        assert process("1100b ^ 1010b", spec()) == "110"
+        assert p("1100b ^ 1010b", ) == "110"
 
     # overrides
     def test_force_hex(self):
-        assert process("198 | 121", spec(base=Base.HEX)) == "0xff"
+        assert p("198 | 121", base=Base.HEX) == "0xff"
     def test_force_dec(self):
-        assert process("0xdeadbeef", spec(base=Base.DEC)) == "3735928559"
+        assert p("0xdeadbeef", base=Base.DEC) == "3735928559"
     def test_force_oct(self):
-        assert process("255", spec(base=Base.OCT)) == "0o377"
+        assert p("255", base=Base.OCT) == "0o377"
     def test_force_bin(self):
-        assert process("0xc6 ^ 0x79", spec(base=Base.BIN)) == "10111111"
+        assert p("0xc6 ^ 0x79", base=Base.BIN) == "10111111"
     def test_force_bin_spaces(self):
-        assert process("0xc6 ^ 0x79", spec(base=Base.BIN, spaces=True)) == "1011 1111"
+        assert p("0xc6 ^ 0x79", base=Base.BIN, spaces=True) == "1011 1111"
 
     # grouped
     def test_W1_spaces(self):
-        assert process("0xdeadbeef", spec(group_mode=GroupMode.BYTE, group_n=1, spaces=True)) == "de ad be ef"
+        assert p("0xdeadbeef", group_mode=GroupMode.BYTE, group_n=1, spaces=True) == "de ad be ef"
     def test_W2_spaces(self):
-        assert process("0xdeadbeef", spec(group_mode=GroupMode.BYTE, group_n=2, spaces=True)) == "dead beef"
+        assert p("0xdeadbeef", group_mode=GroupMode.BYTE, group_n=2, spaces=True) == "dead beef"
     def test_w1_spaces(self):
-        assert process("0xdeadbeef", spec(group_mode=GroupMode.NIBBLE, group_n=1, spaces=True)) == "d e a d b e e f"
+        assert p("0xdeadbeef", group_mode=GroupMode.NIBBLE, group_n=1, spaces=True) == "d e a d b e e f"
 
     # endian
     def test_little_alone(self):
-        assert process("0xdeadbeef", spec(endian=Endian.LITTLE)) == "efbeadde"
+        assert p("0xdeadbeef", endian=Endian.LITTLE) == "efbeadde"
     def test_little_spaces(self):
-        assert process("0xdeadbeef", spec(endian=Endian.LITTLE, spaces=True)) == "efbe adde"
+        assert p("0xdeadbeef", endian=Endian.LITTLE, spaces=True) == "efbe adde"
     def test_W1_little_spaces(self):
-        r = process("0xdeadbeef", spec(group_mode=GroupMode.BYTE, group_n=1, endian=Endian.LITTLE, spaces=True))
+        r, _ = process("0xdeadbeef", spec(group_mode=GroupMode.BYTE, group_n=1, endian=Endian.LITTLE, spaces=True))
         assert r == "ef be ad de"
 
     # escape / c-array
     def test_escape(self):
-        assert process("0xdeadbeef", spec(escape=True)) == r"\xde\xad\xbe\xef"
+        assert p("0xdeadbeef", escape=True) == r"\xde\xad\xbe\xef"
     def test_c_array(self):
-        assert process("0xdeadbeef", spec(c_array=True)) == "{ 0xde, 0xad, 0xbe, 0xef }"
+        assert p("0xdeadbeef", c_array=True) == "{ 0xde, 0xad, 0xbe, 0xef }"
 
     # upper / no-prefix
     def test_upper(self):
-        assert process("0xdeadbeef", spec(upper=True)) == "0XDEADBEEF"
+        assert p("0xdeadbeef", upper=True) == "0XDEADBEEF"
     def test_no_prefix(self):
-        assert process("0xdeadbeef", spec(no_prefix=True)) == "deadbeef"
+        assert p("0xdeadbeef", no_prefix=True) == "deadbeef"
 
     # width override
     def test_width_override(self):
-        r = process("0xff", spec(
+        r, _ = process("0xff", spec(
             group_mode=GroupMode.BYTE, group_n=1, spaces=True, width=32
         ))
         assert r == "00 00 00 ff"
 
     # 64-bit
     def test_64bit(self):
-        assert process("0xdeadbeefcafebabe", spec()) == "0xdeadbeefcafebabe"
+        assert p("0xdeadbeefcafebabe", ) == "0xdeadbeefcafebabe"
     def test_64bit_W2_spaces(self):
-        r = process("0xdeadbeefcafebabe", spec(group_mode=GroupMode.BYTE, group_n=2, spaces=True))
+        r, _ = process("0xdeadbeefcafebabe", spec(group_mode=GroupMode.BYTE, group_n=2, spaces=True))
         assert r == "dead beef cafe babe"
 
     # real-world
     def test_rop_address(self):
-        r = process("0x08048460", spec(group_mode=GroupMode.BYTE, group_n=1, endian=Endian.LITTLE, spaces=True))
+        r, _ = process("0x08048460", spec(group_mode=GroupMode.BYTE, group_n=1, endian=Endian.LITTLE, spaces=True))
         assert r == "60 84 04 08"
     def test_port_bytes(self):
-        r = process("4444", spec(group_mode=GroupMode.BYTE, group_n=1, endian=Endian.LITTLE, spaces=True))
+        r, _ = process("4444", spec(group_mode=GroupMode.BYTE, group_n=1, endian=Endian.LITTLE, spaces=True))
         assert r == "5c 11"
 
     # error
     def test_invalid_expr(self):
         with pytest.raises(ValueError):
-            process("not_valid !!!", spec())
+            p("not_valid !!!")
+
+
+# ── fmt_signed ────────────────────────────────────────────────────────────────
+
+class TestFmtSigned:
+    def test_0xff_8bit(self):
+        assert fmt_signed(0xff, 8) == "-1"
+    def test_0x80_8bit(self):
+        assert fmt_signed(0x80, 8) == "-128"
+    def test_0x7f_8bit(self):
+        assert fmt_signed(0x7f, 8) == "127"
+    def test_0x8000_16bit(self):
+        assert fmt_signed(0x8000, 16) == "-32768"
+    def test_positive_unchanged(self):
+        assert fmt_signed(0x0f, 8) == "15"
+    def test_max_positive_8bit(self):
+        assert fmt_signed(0x7f, 8) == "127"
+
+
+# ── ascii_encode / fmt_ascii_decode ───────────────────────────────────────────
+
+class TestAscii:
+    def test_encode_single_char(self):
+        from core.engine import ascii_encode
+        assert ascii_encode("A") == 0x41
+    def test_encode_AAAA(self):
+        from core.engine import ascii_encode
+        assert ascii_encode("AAAA") == 0x41414141
+    def test_encode_hello(self):
+        from core.engine import ascii_encode
+        assert ascii_encode("hello") == 0x68656c6c6f
+
+    def test_decode_AAAA(self):
+        assert fmt_ascii_decode(0x41414141, 32) == "AAAA"
+    def test_decode_hello(self):
+        assert fmt_ascii_decode(0x68656c6c6f, 40) == "hello"
+    def test_decode_non_printable(self):
+        # 0x00 is non-printable -> dot
+        assert fmt_ascii_decode(0x0041, 16) == ".A"
+
+
+# ── new process() modes ───────────────────────────────────────────────────────
+
+class TestProcessNew:
+    def test_ascii_decode(self):
+        assert p("0x41414141", ascii_decode=True) == "AAAA"
+    def test_ascii_encode(self):
+        assert p("AAAA", ascii_encode=True) == "0x41414141"
+    def test_ascii_encode_hello(self):
+        assert p("hello", ascii_encode=True) == "0x68656c6c6f"
+    def test_signed_hex_in(self):
+        assert p("0xff", signed=True, base=Base.DEC) == "-1"
+    def test_signed_8000(self):
+        assert p("0x8000", signed=True, base=Base.DEC, width=16) == "-32768"
+    def test_signed_decimal_expr(self):
+        assert p("-4 + -3", signed=True) == "-7"
+    def test_overflow_simulation(self):
+        assert p("0xffffffff + 1", width=32) == "0x0"
+    def test_verbose_returns_info(self):
+        _, verbose = process("0xc6 ^ 0x79", spec())
+        assert verbose is None  # verbose=False by default
+    def test_verbose_on(self):
+        _, verbose = process("0xc6 ^ 0x79", spec(verbose=True))
+        assert verbose is not None
+        assert "0xc6 ^ 0x79" in verbose
+        assert "8 bits" in verbose
+    def test_show_all_has_ascii_row(self):
+        out, _ = process("0x41414141", spec(show_all=True))
+        assert "ascii" in out
+        assert "AAAA" in out
+    def test_show_all_has_signed_row(self):
+        out, _ = process("0xff", spec(show_all=True, signed=True))
+        assert "signed" in out
+        assert "-1" in out

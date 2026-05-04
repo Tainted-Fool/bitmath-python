@@ -11,21 +11,20 @@ this file's argparse logic maps to a C getopt_long() block.
 """
 
 import argparse
+import os
 import sys
 from typing import Optional
 
-# Adjust path so this script works both as `python3 cli/bitmath.py` and
-# as an installed entry point.
-try:
-    from core import (
-        Base, GroupMode, Endian, FormatSpec, process
-    )
-except ImportError:
-    import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-    from core import (
-        Base, GroupMode, Endian, FormatSpec, process
-    )
+# Always resolve the project root via __file__ so imports work regardless of
+# the current working directory or how the script is invoked
+# (./bitmath, python3 cli/bitmath.py, python3 -m cli.bitmath, etc.)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+ 
+from core.engine import (
+    Base, GroupMode, Endian, FormatSpec, process
+)
 
 
 # ── argument parser ───────────────────────────────────────────────────────────
@@ -54,8 +53,14 @@ EXAMPLES
   bitmath -W 1 -s -e little "0xdeadbeef"   →  ef be ad de
   bitmath -E "0xdeadbeef"                  →  \\xde\\xad\\xbe\\xef
   bitmath --c-array "0xdeadbeef"           →  { 0xde, 0xad, 0xbe, 0xef }
+  bitmath --ascii-decode "0x41414141"      →  AAAA
+  bitmath --ascii-encode "AAAA"            →  0x41414141
+  bitmath -t "0xff"                        →  -1     (signed 8-bit)
+  bitmath -t -S 16 "0x8000"                →  -32768 (signed 16-bit)
+  bitmath -t "-4 + -3"                     →  -7     (signed, width auto-inferred as 8)
+  bitmath -v "0xc6 ^ 0x79"                 →  verbose parse info + 0xbf
+  bitmath -S 32 "0xffffffff + 1"           →  0x0   (32-bit overflow)
   bitmath -x -u "0xdeadbeef"               →  0XDEADBEEF
-  bitmath -x -P "0xdeadbeef"               →  deadbeef
   bitmath --width 64 "0xff"                →  0x00000000000000ff (via -W 1 -s)
   echo "0xc6 ^ 0x79" | bitmath             →  0xbf  (stdin)
 """
@@ -104,16 +109,25 @@ def build_parser() -> argparse.ArgumentParser:
     disp.add_argument('-e', '--endian', choices=['big', 'little'], default='big',
                       metavar='ORDER',
                       help='byte order: big (default) or little')
-    disp.add_argument('--width', metavar='BITS', type=int, default=None,
-                      help='force display width: 8, 16, 32, 64, 128, 256')
+    disp.add_argument('-S', '--size', '--width', dest='width', metavar='BITS',
+                      type=int, default=None,
+                      help='force display width: 8, 16, 32, 64 (also simulates overflow)')
 
     special = p.add_argument_group('special output modes')
     special.add_argument('-a', '--all', dest='show_all', action='store_true',
-                         help='show hex, dec, oct, bin, bytes at once')
+                         help='show hex, dec, oct, bin, bytes, ascii at once')
     special.add_argument('-E', '--escape', action='store_true',
                          help=r'C/Python \x escape sequence  (\xde\xad\xbe\xef)')
     special.add_argument('--c-array', dest='c_array', action='store_true',
                          help='C byte-array literal  ({ 0xde, 0xad, 0xbe, 0xef })')
+    special.add_argument('--ascii-decode', dest='ascii_decode', action='store_true',
+                         help='decode integer to ASCII string  (0x41414141 -> AAAA)')
+    special.add_argument('--ascii-encode', dest='ascii_encode', action='store_true',
+                         help='encode ASCII string to hex integer  ("AAAA" -> 0x41414141)')
+    special.add_argument('-t', '--signed', action='store_true',
+                         help='interpret result as signed two\'s complement  (0xff -> -1)')
+    special.add_argument('-v', '--verbose', action='store_true',
+                         help='print parse/eval diagnostics to stderr before output')
 
     p.add_argument('-h', '--help', action='help',
                    help='show this help message and exit')
@@ -145,20 +159,25 @@ def build_spec(args: argparse.Namespace) -> FormatSpec:
         _warn(f"-{args.base[0]} ignored when -W/-w is active (output is always hex)")
 
     # display
-    spec.spaces    = args.spaces
-    spec.upper     = args.upper
-    spec.no_prefix = args.no_prefix
-    spec.endian    = Endian.LITTLE if args.endian == 'little' else Endian.BIG
-    spec.width     = args.width
-
-    # special modes (mutually exclusive with each other)
-    exclusive = [args.show_all, args.escape, args.c_array]
+    spec.spaces       = args.spaces
+    spec.upper        = args.upper
+    spec.no_prefix    = args.no_prefix
+    spec.endian       = Endian.LITTLE if args.endian == 'little' else Endian.BIG
+    spec.width        = args.width
+    spec.show_all     = args.show_all
+    spec.escape       = args.escape
+    spec.c_array      = args.c_array
+    spec.ascii_decode = args.ascii_decode
+    spec.ascii_encode = args.ascii_encode
+    spec.signed       = args.signed
+    spec.verbose      = args.verbose
+ 
+    # mutual exclusion check for output modes
+    exclusive = [args.show_all, args.escape, args.c_array,
+                 args.ascii_decode, args.ascii_encode]
     if sum(bool(x) for x in exclusive) > 1:
-        _die("--all, --escape, and --c-array are mutually exclusive")
-    spec.show_all = args.show_all
-    spec.escape   = args.escape
-    spec.c_array  = args.c_array
-
+        _die("--all, --escape, --c-array, --ascii-decode, --ascii-encode are mutually exclusive")
+ 
     return spec
 
 
@@ -190,9 +209,12 @@ def main() -> None:
     spec   = build_spec(args)
 
     try:
-        output = process(expr, spec)
+        output, verbose = process(expr, spec)
     except ValueError as exc:
         _die(str(exc))
+
+    if verbose:
+        print(verbose, file=sys.stderr)
 
     print(output)
 

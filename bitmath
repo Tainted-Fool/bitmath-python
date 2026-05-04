@@ -2,6 +2,13 @@
 """Entry-point wrapper — lets you run `./bitmath` from the project root."""
 import sys
 import os
-sys.path.insert(0, os.path.dirname(__file__))
+
+# Pin the project root as the FIRST entry on sys.path so that
+# `import core` always resolves to ./core/, never a system package.
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT in sys.path:
+    sys.path.remove(PROJECT_ROOT)
+sys.path.insert(0, PROJECT_ROOT)
+
 from cli.bitmath import main
 main()
