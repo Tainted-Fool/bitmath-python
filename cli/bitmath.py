@@ -2,11 +2,11 @@
 """
 bitmath — exploit-dev friendly bitwise calculator
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-CLI layer.  Parses arguments, reads stdin if needed, calls core.process(),
-and prints the result.  Contains zero business logic.
+CLI layer. Parses arguments, reads stdin if needed, calls core.process(),
+and prints the result. Contains zero business logic.
 
 C-portability note: when a C port is written, this file becomes the only
-thing that changes.  core/engine.py translates 1-to-1 to C functions;
+thing that changes. core/engine.py translates 1-to-1 to C functions;
 this file's argparse logic maps to a C getopt_long() block.
 """
 
@@ -59,15 +59,16 @@ EXAMPLES
   bitmath -t -S 16 "0x8000"                →  -32768 (signed 16-bit)
   bitmath -t "-4 + -3"                     →  -7     (signed, width auto-inferred as 8)
   bitmath -v "0xc6 ^ 0x79"                 →  verbose parse info + 0xbf
-  bitmath -S 32 "0xffffffff + 1"           →  0x0   (32-bit overflow)
+  bitmath -S 32 "0xffffffff + 1"           →  0x0    (32-bit overflow)
   bitmath -x -u "0xdeadbeef"               →  0XDEADBEEF
   bitmath --width 64 "0xff"                →  0x00000000000000ff (via -W 1 -s)
-  echo "0xc6 ^ 0x79" | bitmath             →  0xbf  (stdin)
+  echo "0xc6 ^ 0x79" | bitmath             →  0xbf   (stdin)
 """
 
 def build_parser() -> argparse.ArgumentParser:
+    """Constructs and returns the argument parser."""
     p = argparse.ArgumentParser(
-        prog='bitmath',
+        prog="bitmath",
         description=DESCRIPTION,
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -76,61 +77,61 @@ def build_parser() -> argparse.ArgumentParser:
 
     # positional — optional so stdin works
     p.add_argument(
-        'expression', nargs='?', default=None,
-        metavar='EXPR',
-        help='Bitwise/arithmetic expression (quote it). Reads stdin if omitted.',
+        "expression", nargs="?", default=None,
+        metavar="EXPR",
+        help="Bitwise/arithmetic expression (quote it). Reads stdin if omitted.",
     )
 
-    out = p.add_argument_group('output format (overrides auto-inference)')
-    out.add_argument('-x', dest='base', action='store_const', const='hex',
-                     help='hex output  (0xbf)')
-    out.add_argument('-d', dest='base', action='store_const', const='dec',
-                     help='decimal output  (191)')
-    out.add_argument('-o', dest='base', action='store_const', const='oct',
-                     help='octal output  (0o277)')
-    out.add_argument('-b', dest='base', action='store_const', const='bin',
-                     help='binary output, no leading zeros  (10111111)')
+    out = p.add_argument_group("output format (overrides auto-inference)")
+    out.add_argument("-x", dest="base", action="store_const", const="hex",
+                     help="hex output (0xbf)")
+    out.add_argument("-d", dest="base", action="store_const", const="dec",
+                     help="decimal output (191)")
+    out.add_argument("-o", dest="base", action="store_const", const="oct",
+                     help="octal output (0o277)")
+    out.add_argument("-b", dest="base", action="store_const", const="bin",
+                     help="binary output, no leading zeros (10111111)")
 
-    grp = p.add_argument_group('grouped hex view')
-    grp.add_argument('-W', dest='byte_group', metavar='N', type=int, nargs='?',
+    grp = p.add_argument_group("grouped hex view")
+    grp.add_argument("-W", dest="byte_group", metavar="N", type=int, nargs="?",
                      const=2, default=None,
-                     help='byte-grouped hex; N bytes per group (default 2)')
-    grp.add_argument('-w', dest='nibble_group', metavar='N', type=int, nargs='?',
+                     help="byte-grouped hex; N bytes per group (default 2)")
+    grp.add_argument("-w", dest="nibble_group", metavar="N", type=int, nargs="?",
                      const=2, default=None,
-                     help='nibble-grouped hex; N nibbles per group (default 2)')
+                     help="nibble-grouped hex; N nibbles per group (default 2)")
 
-    disp = p.add_argument_group('display options')
-    disp.add_argument('-s', '--spaces', action='store_true',
-                      help='add spaces between groups (works with -b, -W, -w)')
-    disp.add_argument('-u', '--upper', action='store_true',
-                      help='uppercase hex digits  (DEADBEEF not deadbeef)')
-    disp.add_argument('-P', '--no-prefix', dest='no_prefix', action='store_true',
-                      help='omit 0x / 0b / 0o prefix from output')
-    disp.add_argument('-e', '--endian', choices=['big', 'little'], default='big',
-                      metavar='ORDER',
-                      help='byte order: big (default) or little')
-    disp.add_argument('-S', '--size', '--width', dest='width', metavar='BITS',
+    disp = p.add_argument_group("display options")
+    disp.add_argument("-s", "--spaces", action="store_true",
+                      help="add spaces between groups (works with -b, -W, -w)")
+    disp.add_argument("-u", "--upper", action="store_true",
+                      help="uppercase hex digits (DEADBEEF not deadbeef)")
+    disp.add_argument("-P", "--no-prefix", dest="no_prefix", action="store_true",
+                      help="omit 0x / 0b / 0o prefix from output")
+    disp.add_argument("-e", "--endian", choices=["big", "little"], default="big",
+                      metavar="ORDER",
+                      help="byte order: big (default) or little")
+    disp.add_argument("-S", "--size", "--width", dest="width", metavar="BITS",
                       type=int, default=None,
-                      help='force display width: 8, 16, 32, 64 (also simulates overflow)')
+                      help="force display width: 8, 16, 32, 64 (also simulates overflow)")
 
-    special = p.add_argument_group('special output modes')
-    special.add_argument('-a', '--all', dest='show_all', action='store_true',
-                         help='show hex, dec, oct, bin, bytes, ascii at once')
-    special.add_argument('-E', '--escape', action='store_true',
-                         help=r'C/Python \x escape sequence  (\xde\xad\xbe\xef)')
-    special.add_argument('--c-array', dest='c_array', action='store_true',
-                         help='C byte-array literal  ({ 0xde, 0xad, 0xbe, 0xef })')
-    special.add_argument('--ascii-decode', dest='ascii_decode', action='store_true',
-                         help='decode integer to ASCII string  (0x41414141 -> AAAA)')
-    special.add_argument('--ascii-encode', dest='ascii_encode', action='store_true',
-                         help='encode ASCII string to hex integer  ("AAAA" -> 0x41414141)')
-    special.add_argument('-t', '--signed', action='store_true',
-                         help='interpret result as signed two\'s complement  (0xff -> -1)')
-    special.add_argument('-v', '--verbose', action='store_true',
-                         help='print parse/eval diagnostics to stderr before output')
+    special = p.add_argument_group("special output modes")
+    special.add_argument("-a", "--all", dest="show_all", action="store_true",
+                         help="show hex, dec, oct, bin, bytes, ascii at once")
+    special.add_argument("-E", "--escape", action="store_true",
+                         help=r"C/Python \x escape sequence (\xde\xad\xbe\xef)")
+    special.add_argument("--c-array", dest="c_array", action="store_true",
+                         help="C byte-array literal ({ 0xde, 0xad, 0xbe, 0xef })")
+    special.add_argument("--ascii-decode", dest="ascii_decode", action="store_true",
+                         help="decode integer to ASCII string (0x41414141 -> AAAA)")
+    special.add_argument("--ascii-encode", dest="ascii_encode", action="store_true",
+                         help="encode ASCII string to hex integer ('AAAA' -> 0x41414141)")
+    special.add_argument("-t", "--signed", action="store_true",
+                         help="interpret result as signed two's complement (0xff -> -1)")
+    special.add_argument("-v", "--verbose", action="store_true",
+                         help="print parse/eval diagnostics to stderr before output")
 
-    p.add_argument('-h', '--help', action='help',
-                   help='show this help message and exit')
+    p.add_argument("-h", "--help", action="help",
+                   help="show this help message and exit")
 
     return p
 
@@ -141,7 +142,7 @@ def build_spec(args: argparse.Namespace) -> FormatSpec:
     spec = FormatSpec()
 
     # base
-    base_map = {'hex': Base.HEX, 'dec': Base.DEC, 'oct': Base.OCT, 'bin': Base.BIN}
+    base_map = {"hex": Base.HEX, "dec": Base.DEC, "oct": Base.OCT, "bin": Base.BIN}
     spec.base = base_map.get(args.base)  # None → auto-infer
 
     # grouped mode (-W / -w are mutually exclusive)
@@ -155,14 +156,14 @@ def build_spec(args: argparse.Namespace) -> FormatSpec:
         spec.group_n    = args.nibble_group
 
     # warn: -x/-d/-o alongside -W/-w is silently ignored
-    if spec.group_mode != GroupMode.NONE and args.base in ('hex', 'dec', 'oct'):
+    if spec.group_mode != GroupMode.NONE and args.base in ("hex", "dec", "oct"):
         _warn(f"-{args.base[0]} ignored when -W/-w is active (output is always hex)")
 
     # display
     spec.spaces       = args.spaces
     spec.upper        = args.upper
     spec.no_prefix    = args.no_prefix
-    spec.endian       = Endian.LITTLE if args.endian == 'little' else Endian.BIG
+    spec.endian       = Endian.LITTLE if args.endian == "little" else Endian.BIG
     spec.width        = args.width
     spec.show_all     = args.show_all
     spec.escape       = args.escape
@@ -219,5 +220,5 @@ def main() -> None:
     print(output)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

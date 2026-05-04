@@ -53,29 +53,29 @@ class Endian(Enum):
 
 @dataclass
 class FormatSpec:
-    """All display options in one place.  Mirrors what the CLI parses."""
-    base:        Optional[Base]  = None   # None = auto-infer
-    group_mode:  GroupMode       = GroupMode.NONE
-    group_n:     int             = 2
-    endian:      Endian          = Endian.BIG
-    spaces:      bool            = False
-    upper:       bool            = False
-    no_prefix:   bool            = False   # strip 0x / 0b / 0o
-    escape:      bool            = False   # \xNN output
-    c_array:     bool            = False   # { 0xNN, ... }
-    show_all:    bool            = False   # print all bases
-    width:       Optional[int]   = None    # explicit bit-width override
-    signed:       bool           = False   # two's-complement signed decimal
-    ascii_decode: bool           = False   # integer -> ASCII string
-    ascii_encode: bool           = False   # ASCII string -> hex integer
-    verbose:      bool           = False   # show parse/eval steps on stderr
+    """All display options in one place. Mirrors what the CLI parses."""
+    base:         Optional[Base]  = None    # None = auto-infer
+    group_mode:   GroupMode       = GroupMode.NONE
+    group_n:      int             = 2
+    endian:       Endian          = Endian.BIG
+    spaces:       bool            = False
+    upper:        bool            = False
+    no_prefix:    bool            = False   # strip 0x / 0b / 0o
+    escape:       bool            = False   # \xNN output
+    c_array:      bool            = False   # { 0xNN, ... }
+    show_all:     bool            = False   # print all bases
+    width:        Optional[int]   = None    # explicit bit-width override
+    signed:       bool            = False   # two's-complement signed decimal
+    ascii_decode: bool            = False   # integer -> ASCII string
+    ascii_encode: bool            = False   # ASCII string -> hex integer
+    verbose:      bool            = False   # show parse/eval steps on stderr
 
 
 @dataclass
 class EvalResult:
     """Everything produced by a single expression evaluation."""
-    unsigned:    int             # masked unsigned value
-    width:       int             # inferred or overridden bit-width (8/16/32/64/...)
+    unsigned:      int           # masked unsigned value
+    width:         int           # inferred or overridden bit-width (8/16/32/64/...)
     inferred_base: Base          # base detected from first literal
 
 
@@ -103,13 +103,13 @@ class VerboseInfo:
 # C note: bm_translate_expr() does the same rewriting with two regex passes
 # on a stack-allocated char buffer.
 
-_RE_OCT_SUFFIX = re.compile(r'(?<![0-9a-fA-F_])([0-9]+)[oO](?![0-9a-fA-F_])')
-_RE_BIN_SUFFIX = re.compile(r'(?<![0-9a-fA-F_])([01]+)[bB](?![0-9a-fA-F_])')
+_RE_OCT_SUFFIX = re.compile(r"(?<![0-9a-fA-F_])([0-9]+)[oO](?![0-9a-fA-F_])")
+_RE_BIN_SUFFIX = re.compile(r"(?<![0-9a-fA-F_])([01]+)[bB](?![0-9a-fA-F_])")
 
 def translate_expr(expr: str) -> str:
     """Rewrite custom literal suffixes to Python-native form."""
-    expr = _RE_OCT_SUFFIX.sub(r'0o\1', expr)
-    expr = _RE_BIN_SUFFIX.sub(r'0b\1', expr)
+    expr = _RE_OCT_SUFFIX.sub(r"0o\1", expr)
+    expr = _RE_BIN_SUFFIX.sub(r"0b\1", expr)
     return expr
 
 
@@ -148,10 +148,10 @@ def evaluate(expr: str) -> int:
 # C note: bm_infer_width() iterates the token stream from the parser.
 
 _RE_LITERALS = re.compile(
-    r'0[xX][0-9a-fA-F]+'    # hex
-    r'|0[bB][01]+'          # binary
-    r'|0[oO][0-7]+'         # octal
-    r'|\b\d+\b'             # decimal
+    r"0[xX][0-9a-fA-F]+"    # hex
+    r"|0[bB][01]+"          # binary
+    r"|0[oO][0-7]+"         # octal
+    r"|\b\d+\b"             # decimal
 )
 
 def _next_pow2_bytes(bits: int, minimum: int = 8) -> int:
@@ -192,12 +192,12 @@ def mask_unsigned(value: int, width: int) -> int:
 # Operators and whitespace are skipped.
 
 _RE_FIRST_LITERAL = re.compile(
-    r'0[xX][0-9a-fA-F]+'    # hex   (check before plain int)
-    r'|0[bB][01]+'          # binary (0b prefix — post-translation)
-    r'|0[oO][0-7]+'         # octal  (0o prefix — post-translation)
-    r'|[01]+[bB]'           # binary (original b-suffix, pre-translation)
-    r'|[0-9]+[oO]'          # octal  (original o-suffix, pre-translation)
-    r'|\b[0-9]+\b'          # decimal
+    r"0[xX][0-9a-fA-F]+"    # hex (check before plain int)
+    r"|0[bB][01]+"          # binary (0b prefix — post-translation)
+    r"|0[oO][0-7]+"         # octal (0o prefix — post-translation)
+    r"|[01]+[bB]"           # binary (original b-suffix, pre-translation)
+    r"|[0-9]+[oO]"          # octal (original o-suffix, pre-translation)
+    r"|\b[0-9]+\b"          # decimal
 )
 
 def detect_infix_base(expr: str) -> Base:
@@ -209,11 +209,11 @@ def detect_infix_base(expr: str) -> Base:
     if not m:
         return Base.DEC
     tok = m.group(0)
-    if tok.startswith(('0x', '0X')):
+    if tok.startswith(("0x", "0X")):
         return Base.HEX
-    if tok.startswith(('0b', '0B')) or tok.endswith(('b', 'B')):
+    if tok.startswith(("0b", "0B")) or tok.endswith(("b", "B")):
         return Base.BIN
-    if tok.startswith(('0o', '0O')) or tok.endswith(('o', 'O')):
+    if tok.startswith(("0o", "0O")) or tok.endswith(("o", "O")):
         return Base.OCT
     return Base.DEC
 
@@ -221,40 +221,40 @@ def detect_infix_base(expr: str) -> Base:
 # ── scalar formatters ─────────────────────────────────────────────────────────
 
 def fmt_hex(n: int, upper: bool = False, prefix: bool = True) -> str:
-    """Format as hex.  `prefix` controls the 0x leader."""
-    h = format(n, 'X' if upper else 'x')
-    return (('0X' if upper else '0x') + h) if prefix else h
+    """Format as hex. `prefix` controls the 0x leader."""
+    h = format(n, "X" if upper else "x")
+    return (("0X" if upper else "0x") + h) if prefix else h
 
 def fmt_dec(n: int) -> str:
     return str(n)
 
 def fmt_oct(n: int, prefix: bool = True) -> str:
-    o = format(n, 'o')
-    return ('0o' + o) if prefix else o
+    o = format(n, "o")
+    return ("0o" + o) if prefix else o
 
 def fmt_bin(n: int, spaces: bool = False) -> str:
     """
-    Binary without leading zeros.  With `spaces`, nibble-groups are
+    Binary without leading zeros. With `spaces`, nibble-groups are
     space-separated; a leading all-zero nibble is stripped.
     """
-    raw = format(n, 'b') if n > 0 else '0'
+    raw = format(n, "b") if n > 0 else "0"
     if not spaces:
         return raw
     # Pad to nibble boundary
     pad = (4 - len(raw) % 4) % 4
-    raw = '0' * pad + raw
+    raw = "0" * pad + raw
     groups = [raw[i:i+4] for i in range(0, len(raw), 4)]
     # Drop leading zero-nibble (it was only padding)
-    while len(groups) > 1 and groups[0] == '0000':
+    while len(groups) > 1 and groups[0] == "0000":
         groups.pop(0)
-    return ' '.join(groups)
+    return " ".join(groups)
 
 
 # ── grouped hex formatters ────────────────────────────────────────────────────
 
 def _nibble_list(n: int, width: int, upper: bool = False) -> list[str]:
     """Return a flat list of `width//4` hex nibble chars, MSB-first."""
-    fmt = f'0{width // 4}{"X" if upper else "x"}'
+    fmt = f"0{width // 4}{'X' if upper else 'x'}"
     return list(format(n, fmt))
 
 def _apply_endian(nibbles: list[str], endian: Endian) -> list[str]:
@@ -278,14 +278,14 @@ def fmt_grouped(
     """
     Byte-grouped (-W) or nibble-grouped (-w) hex output.
 
-    mode=BYTE:   group_n is in bytes  → chunk = group_n * 2 nibbles
+    mode=BYTE:   group_n is in bytes   → chunk = group_n * 2 nibbles
     mode=NIBBLE: group_n is in nibbles → chunk = group_n nibbles
     """
     nibbles = _nibble_list(n, width, upper)
     nibbles = _apply_endian(nibbles, endian)
     chunk = group_n * 2 if mode == GroupMode.BYTE else group_n
-    groups = [''.join(nibbles[i:i+chunk]) for i in range(0, len(nibbles), chunk)]
-    sep = ' ' if spaces else ''
+    groups = ["".join(nibbles[i:i+chunk]) for i in range(0, len(nibbles), chunk)]
+    sep = " " if spaces else ""
     return sep.join(groups)
 
 
@@ -295,17 +295,17 @@ def fmt_escape(n: int, width: int, endian: Endian, upper: bool = False) -> str:
     r"""Format as \xNN\xNN... escape sequence."""
     nibbles = _nibble_list(n, width, upper)
     nibbles = _apply_endian(nibbles, endian)
-    pairs = [''.join(nibbles[i:i+2]) for i in range(0, len(nibbles), 2)]
-    return ''.join(f'\\x{p}' for p in pairs)
+    pairs = ["".join(nibbles[i:i+2]) for i in range(0, len(nibbles), 2)]
+    return "".join(f"\\x{p}" for p in pairs)
 
 def fmt_c_array(n: int, width: int, endian: Endian, upper: bool = False) -> str:
     """Format as a C byte-array literal: { 0xde, 0xad, 0xbe, 0xef }"""
     nibbles = _nibble_list(n, width, upper)
     nibbles = _apply_endian(nibbles, endian)
-    pairs = [''.join(nibbles[i:i+2]) for i in range(0, len(nibbles), 2)]
-    prefix = '0X' if upper else '0x'
-    elems = ', '.join(f'{prefix}{p}' for p in pairs)
-    return '{ ' + elems + ' }'
+    pairs = ["".join(nibbles[i:i+2]) for i in range(0, len(nibbles), 2)]
+    prefix = "0X" if upper else "0x"
+    elems = ", ".join(f"{prefix}{p}" for p in pairs)
+    return "{ " + elems + " }"
 
 
 # ── "show all" formatter ──────────────────────────────────────────────────────
@@ -317,16 +317,16 @@ def fmt_all(result: EvalResult, upper: bool = False, signed: bool = False) -> di
     """
     n, w = result.unsigned, result.width
     rows = {
-        'hex':    fmt_hex(n, upper=upper),
-        'dec':    fmt_dec(n),
-        'oct':    fmt_oct(n),
-        'bin':    fmt_bin(n, spaces=True),
-        'bytes':  fmt_grouped(n, w, GroupMode.BYTE, 1, Endian.BIG, spaces=True, upper=upper),
-        'ascii':  fmt_ascii_decode(n, w),
-        'width':  f'{w}-bit',
+        "hex":    fmt_hex(n, upper=upper),
+        "dec":    fmt_dec(n),
+        "oct":    fmt_oct(n),
+        "bin":    fmt_bin(n, spaces=True),
+        "bytes":  fmt_grouped(n, w, GroupMode.BYTE, 1, Endian.BIG, spaces=True, upper=upper),
+        "ascii":  fmt_ascii_decode(n, w),
+        "width":  f"{w}-bit",
     }
     if signed:
-        rows['signed'] = fmt_signed(n, w)
+        rows["signed"] = fmt_signed(n, w)
     return rows
 
 
@@ -337,9 +337,9 @@ def fmt_signed(n: int, width: int) -> str:
     Interpret `n` as a two's-complement signed integer of `width` bits.
     C equivalent: bm_fmt_signed() using (int64_t) cast or equivalent.
  
-      0xff  (8-bit)  -> -1
-      0x80  (8-bit)  -> -128
-      0x7f  (8-bit)  -> 127
+      0xff (8-bit) -> -1
+      0x80 (8-bit) -> -128
+      0x7f (8-bit) -> 127
     """
     msb_mask = 1 << (width - 1)
     if n & msb_mask:
@@ -355,17 +355,17 @@ def fmt_ascii_decode(n: int, width: int) -> str:
     Non-printable bytes are rendered as dots (like xxd / strings behaviour).
     C equivalent: bm_fmt_ascii_decode() iterating bytes MSB-first.
  
-      0x41414141 -> AAAA
+      0x41414141   -> AAAA
       0x68656c6c6f -> hello
-      0x4865 -> He
+      0x4865       -> He
     """
     byte_len = max(1, width // 8)
-    hex_str = format(n, f'0{byte_len * 2}x')
+    hex_str = format(n, f"0{byte_len * 2}x")
     out = []
     for i in range(0, len(hex_str), 2):
         byte_val = int(hex_str[i:i+2], 16)
-        out.append(chr(byte_val) if 32 <= byte_val <= 126 else '.')
-    return ''.join(out)
+        out.append(chr(byte_val) if 32 <= byte_val <= 126 else ".")
+    return "".join(out)
  
 def ascii_encode(text: str) -> int:
     """
@@ -375,7 +375,7 @@ def ascii_encode(text: str) -> int:
       "AAAA"  -> 0x41414141
       "hello" -> 0x68656c6c6f
     """
-    return int.from_bytes(text.encode('utf-8'), byteorder='big')
+    return int.from_bytes(text.encode("utf-8"), byteorder="big")
  
  
 # ── verbose info ──────────────────────────────────────────────────────────────
@@ -386,23 +386,24 @@ def fmt_verbose(info: VerboseInfo) -> str:
     Returned as a string — the CLI layer prints it to stderr.
     """
     lines = [
-        f'[+] Parsed Expr  : {info.py_expr}',
-        f'[+] Width        : {info.width} bits',
-        f'[+] Output Mode  : {info.mode}',
-        f'[+] Raw Int      : {info.raw_int}',
-        f'[+] Unsigned Val : {info.unsigned}',
-        '-' * 44,
+        f"[+] Parsed Expr  : {info.py_expr}",
+        f"[+] Width        : {info.width} bits",
+        f"[+] Output Mode  : {info.mode}",
+        f"[+] Raw Int      : {info.raw_int}",
+        f"[+] Unsigned Val : {info.unsigned}",
+        "-" * 44,
     ]
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 # ── main entry point for the CLI layer ───────────────────────────────────────
+
 def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
     """
     Evaluate `expr` and format the result according to `spec`.
  
     Returns a tuple of (output, verbose_block):
-      - output:       the formatted result string, ready to print to stdout
+      - output:        the formatted result string, ready to print to stdout
       - verbose_block: a diagnostic string to print to stderr, or None
  
     Raises ValueError on bad input.
@@ -418,13 +419,13 @@ def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
         raw      = ascii_encode(expr)
         width    = spec.width or max(8, len(expr) * 8)
         unsigned = mask_unsigned(raw, width)
-        mode_str = spec.base.name.lower() if spec.base else 'x'
+        mode_str = spec.base.name.lower() if spec.base else "x"
         output_base = spec.base or Base.HEX
  
         verbose = None
         if spec.verbose:
             info = VerboseInfo(
-                py_expr=f'encode({expr!r})',
+                py_expr=f"encode({expr!r})",
                 width=width, mode=mode_str,
                 raw_int=raw, unsigned=unsigned,
             )
@@ -453,12 +454,12 @@ def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
     result   = EvalResult(unsigned=unsigned, width=width, inferred_base=inferred)
  
     # Determine mode label for verbose output
-    if spec.ascii_decode:          mode_str = 'ascii-decode'
-    elif spec.show_all:            mode_str = 'all'
-    elif spec.escape:              mode_str = 'escape'
-    elif spec.c_array:             mode_str = 'c-array'
-    elif spec.group_mode != GroupMode.NONE: mode_str = f'grouped-{spec.group_mode.name.lower()}'
-    elif spec.signed:              mode_str = 'signed-dec'
+    if spec.ascii_decode:          mode_str = "ascii-decode"
+    elif spec.show_all:            mode_str = "all"
+    elif spec.escape:              mode_str = "escape"
+    elif spec.c_array:             mode_str = "c-array"
+    elif spec.group_mode != GroupMode.NONE: mode_str = f"grouped-{spec.group_mode.name.lower()}"
+    elif spec.signed:              mode_str = "signed-dec"
     else:                          mode_str = base.name.lower()
  
     verbose = None
@@ -476,11 +477,11 @@ def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
     # ── show all ─────────────────────────────────────────────────────────────
     if spec.show_all:
         rows = fmt_all(result, upper=spec.upper, signed=spec.signed)
-        width_val = rows.pop('width')
+        width_val = rows.pop("width")
         col = max(len(k) for k in rows)
-        lines = [f"  {k:<{col}}  {v}" for k, v in rows.items()]
-        lines.append(f"  {'width':<{col}}  {width_val}")
-        return '\n'.join(lines), verbose
+        lines = [f"{k:<{col}} {v}" for k, v in rows.items()]
+        lines.append(f"{"width":<{col}} {width_val}")
+        return "\n".join(lines), verbose
  
     # ── escape / c-array ─────────────────────────────────────────────────────
     if spec.escape:
@@ -518,4 +519,4 @@ def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
     if base == Base.BIN:
         return fmt_bin(unsigned, spaces=spec.spaces), verbose
  
-    return fmt_hex(unsigned, upper=spec.upper, prefix=prefix), verbose  # fallback
+    return fmt_hex(unsigned, upper=spec.upper, prefix=prefix), verbose # fallback

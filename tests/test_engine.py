@@ -4,7 +4,7 @@ Tests for bitmath.core.engine — all business logic, no CLI.
 """
 
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from core.engine import (
@@ -38,7 +38,7 @@ class TestTranslate:
         assert "0o377" in result
 
     def test_no_false_positive_in_hex(self):
-        # 'b' in hex literal must not be treated as binary suffix
+        # "b" in hex literal must not be treated as binary suffix
         expr = "0xdeadbeef"
         assert translate_expr(expr) == "0xdeadbeef"
 
@@ -100,10 +100,10 @@ class TestInferWidth:
         r  = evaluate(expr)
         return infer_width(py, r)
 
-    def test_8bit(self):   assert self._w("0xff") == 8
-    def test_16bit(self):  assert self._w("0xffff") == 16
-    def test_32bit(self):  assert self._w("0xdeadbeef") == 32
-    def test_64bit(self):  assert self._w("0xdeadbeefcafebabe") == 64
+    def test_8bit(self):    assert self._w("0xff") == 8
+    def test_16bit(self):   assert self._w("0xffff") == 16
+    def test_32bit(self):   assert self._w("0xdeadbeef") == 32
+    def test_64bit(self):   assert self._w("0xdeadbeefcafebabe") == 64
     def test_decimal(self): assert self._w("255") == 8
     def test_override(self):
         py = translate_expr("0xff")

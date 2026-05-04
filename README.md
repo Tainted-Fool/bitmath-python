@@ -42,9 +42,9 @@ bitmath-py/
 │   ├── __init__.py      # public API exports
 │   └── engine.py        # ALL business logic — zero I/O, zero CLI
 ├── cli/
-│   └── bitmath.py       # argument parsing + I/O only, calls bm.process()
+│   └── bitmath.py       # argument parsing + I/O only, calls core.process()
 └── tests/
-    └── test_engine.py   # 110 tests covering every function in bm/
+    └── test_engine.py   # 110 tests covering every function in core/
 ```
 
 `core/` and `cli/` are deliberately separated. Every function in `core/engine.py`
