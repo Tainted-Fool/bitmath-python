@@ -23,8 +23,10 @@ from .engine import (
     fmt_all,
     fmt_signed,
     fmt_ascii_decode,
+    fmt_ascii,
     ascii_encode,
-    fmt_verbose
+    fmt_verbose,
+    xor_string,
 )
 
 __all__ = [
@@ -34,4 +36,6 @@ __all__ = [
     "detect_infix_base",
     "fmt_hex", "fmt_dec", "fmt_oct", "fmt_bin",
     "fmt_grouped", "fmt_escape", "fmt_c_array", "fmt_all",
+    "fmt_signed", "fmt_ascii_decode", "fmt_ascii", "ascii_encode",
+    "fmt_verbose", "xor_string",
 ]

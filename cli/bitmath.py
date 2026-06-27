@@ -13,15 +13,11 @@ this file's argparse logic maps to a C getopt_long() block.
 import argparse
 import os
 import sys
-from typing import Optional
 
-# Always resolve the project root via __file__ so imports work regardless of
-# the current working directory or how the script is invoked
-# (./bitmath, python3 cli/bitmath.py, python3 -m cli.bitmath, etc.)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
- 
+
 from core.engine import (
     Base, GroupMode, Endian, FormatSpec, process
 )
@@ -31,7 +27,7 @@ from core.engine import (
 
 DESCRIPTION = "bitmath — exploit-dev friendly bitwise calculator"
 
-EPILOG = """
+EPILOG = r"""
 LITERAL FORMATS
   0x1f        hex      (0x prefix)
   255         decimal  (plain integer)
@@ -43,27 +39,34 @@ AUTO-INFERENCE
     bitmath "0xc6 ^ 0x79"    →  0xbf   (hex in → hex out)
     bitmath "198 | 121"      →  255    (dec in → dec out)
     bitmath "1010b | 0101b"  →  1111   (bin in → bin out)
-  Override with -x / -d / -o / -b.
+  Override with -x / -d / -o / -b / -a.
+
+STRING XOR
+  At least one side can be a plaintext string:
+    bitmath "hello ^ 0x5"           → XOR every byte against 0x05
+    bitmath "hello ^ world"         → XOR each char against corresponding key char
+    bitmath "hello world ^ 0x4142"  → cycle 0x41,0x42 across all chars
 
 EXAMPLES
-  bitmath "0xc6 ^ 0x79"                    →  0xbf
-  bitmath -a "0xdeadbeef"                  →  all representations
-  bitmath -b -s "0xc6 ^ 0x79"              →  1011 1111
-  bitmath -W 1 -s "0xdeadbeef"             →  de ad be ef
-  bitmath -W 1 -s -e little "0xdeadbeef"   →  ef be ad de
-  bitmath -E "0xdeadbeef"                  →  \\xde\\xad\\xbe\\xef
-  bitmath --c-array "0xdeadbeef"           →  { 0xde, 0xad, 0xbe, 0xef }
-  bitmath --ascii-decode "0x41414141"      →  AAAA
-  bitmath --ascii-encode "AAAA"            →  0x41414141
-  bitmath -t "0xff"                        →  -1     (signed 8-bit)
-  bitmath -t -S 16 "0x8000"                →  -32768 (signed 16-bit)
-  bitmath -t "-4 + -3"                     →  -7     (signed, width auto-inferred as 8)
-  bitmath -v "0xc6 ^ 0x79"                 →  verbose parse info + 0xbf
-  bitmath -S 32 "0xffffffff + 1"           →  0x0    (32-bit overflow)
-  bitmath -x -u "0xdeadbeef"               →  0XDEADBEEF
-  bitmath --width 64 "0xff"                →  0x00000000000000ff (via -W 1 -s)
-  echo "0xc6 ^ 0x79" | bitmath             →  0xbf   (stdin)
+  bitmath "0xc6 ^ 0x79"                     →  0xbf
+  bitmath -A "0xdeadbeef"                   →  all representations
+  bitmath -a "0x41414141"                   →  AAAA  (ascii output)
+  bitmath -b -s "0xc6 ^ 0x79"               →  1011 1111
+  bitmath -W 1 -s "0xdeadbeef"              →  de ad be ef
+  bitmath -W 1 -s -e little "0xdeadbeef"    →  ef be ad de
+  bitmath -E "0xdeadbeef"                   →  \xde\xad\xbe\xef
+  bitmath --c-array "0xdeadbeef"            →  { 0xde, 0xad, 0xbe, 0xef }
+  bitmath --decode "0x41414141"             →  AAAA
+  bitmath --encode "AAAA"                   →  0x41414141
+  bitmath -t "0xff"                         →  -1     (signed 8-bit)
+  bitmath -t -S 16 "0x8000"                 →  -32768 (signed 16-bit)
+  bitmath -v "0xc6 ^ 0x79"                  →  verbose parse info + 0xbf
+  bitmath -S 32 "0xffffffff + 1"            →  0x0    (32-bit overflow)
+  bitmath "hello ^ 0x20"                    →  0x48656c6c6f ^ 0x20
+  bitmath "hello ^ world"                   →  per-char XOR result
+  echo "0xc6 ^ 0x79" | bitmath              →  0xbf   (stdin)
 """
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Constructs and returns the argument parser."""
@@ -91,6 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="octal output (0o277)")
     out.add_argument("-b", dest="base", action="store_const", const="bin",
                      help="binary output, no leading zeros (10111111)")
+    out.add_argument("-a", dest="base", action="store_const", const="asc",
+                     help="ascii output — render bytes as ASCII chars (. for non-printable)")
 
     grp = p.add_argument_group("grouped hex view")
     grp.add_argument("-W", dest="byte_group", metavar="N", type=int, nargs="?",
@@ -115,18 +120,31 @@ def build_parser() -> argparse.ArgumentParser:
                       help="force display width: 8, 16, 32, 64 (also simulates overflow)")
 
     special = p.add_argument_group("special output modes")
-    special.add_argument("-a", "--all", dest="show_all", action="store_true",
-                         help="show hex, dec, oct, bin, bytes, ascii at once")
+    special.add_argument("-A", "--all", dest="show_all", action="store_true",
+                         help="show hex, dec, oct, bin, bytes, ascii all at once")
     special.add_argument("-E", "--escape", action="store_true",
                          help=r"C/Python \x escape sequence (\xde\xad\xbe\xef)")
     special.add_argument("--c-array", dest="c_array", action="store_true",
                          help="C byte-array literal ({ 0xde, 0xad, 0xbe, 0xef })")
+
+    # Renamed: --ascii-decode → --decode / -D, --ascii-encode → --encode / -n
+    special.add_argument(
+        "--decode", "-D", dest="ascii_decode", action="store_true",
+        help="decode integer bytes to ASCII string (0x41414141 → AAAA)",
+    )
+    special.add_argument(
+        "--encode", "-n", dest="ascii_encode", action="store_true",
+        help="encode ASCII string to hex integer ('AAAA' → 0x41414141)",
+    )
+
+    # keep the old long-form names as hidden aliases for backwards compat
     special.add_argument("--ascii-decode", dest="ascii_decode", action="store_true",
-                         help="decode integer to ASCII string (0x41414141 -> AAAA)")
+                         help=argparse.SUPPRESS)
     special.add_argument("--ascii-encode", dest="ascii_encode", action="store_true",
-                         help="encode ASCII string to hex integer ('AAAA' -> 0x41414141)")
+                         help=argparse.SUPPRESS)
+
     special.add_argument("-t", "--signed", action="store_true",
-                         help="interpret result as signed two's complement (0xff -> -1)")
+                         help="interpret result as signed two's complement (0xff → -1)")
     special.add_argument("-v", "--verbose", action="store_true",
                          help="print parse/eval diagnostics to stderr before output")
 
@@ -142,7 +160,13 @@ def build_spec(args: argparse.Namespace) -> FormatSpec:
     spec = FormatSpec()
 
     # base
-    base_map = {"hex": Base.HEX, "dec": Base.DEC, "oct": Base.OCT, "bin": Base.BIN}
+    base_map = {
+        "hex": Base.HEX,
+        "dec": Base.DEC,
+        "oct": Base.OCT,
+        "bin": Base.BIN,
+        "asc": Base.ASC,
+    }
     spec.base = base_map.get(args.base)  # None → auto-infer
 
     # grouped mode (-W / -w are mutually exclusive)
@@ -172,13 +196,13 @@ def build_spec(args: argparse.Namespace) -> FormatSpec:
     spec.ascii_encode = args.ascii_encode
     spec.signed       = args.signed
     spec.verbose      = args.verbose
- 
+
     # mutual exclusion check for output modes
     exclusive = [args.show_all, args.escape, args.c_array,
                  args.ascii_decode, args.ascii_encode]
     if sum(bool(x) for x in exclusive) > 1:
-        _die("--all, --escape, --c-array, --ascii-decode, --ascii-encode are mutually exclusive")
- 
+        _die("-A/--all, -E/--escape, --c-array, -D/--decode, -n/--encode are mutually exclusive")
+
     return spec
 
 
