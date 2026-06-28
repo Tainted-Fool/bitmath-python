@@ -14,13 +14,13 @@ import argparse
 import os
 import sys
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
-
 from core.engine import (
     Base, GroupMode, Endian, FormatSpec, process
 )
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 
 # ── argument parser ───────────────────────────────────────────────────────────
@@ -51,6 +51,7 @@ EXAMPLES
   bitmath "0xc6 ^ 0x79"                     →  0xbf
   bitmath -A "0xdeadbeef"                   →  all representations
   bitmath -a "0x41414141"                   →  AAAA  (ascii output)
+  bitmath -x "hello"                        →  0x68656c6c6f
   bitmath -b -s "0xc6 ^ 0x79"               →  1011 1111
   bitmath -W 1 -s "0xdeadbeef"              →  de ad be ef
   bitmath -W 1 -s -e little "0xdeadbeef"    →  ef be ad de
@@ -157,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ── flag validation / spec construction ──────────────────────────────────────
 
 def build_spec(args: argparse.Namespace) -> FormatSpec:
+    """Constructs a FormatSpec object from the parsed arguments."""
     spec = FormatSpec()
 
     # base
@@ -209,13 +211,16 @@ def build_spec(args: argparse.Namespace) -> FormatSpec:
 # ── I/O helpers ───────────────────────────────────────────────────────────────
 
 def _die(msg: str, code: int = 1) -> None:
+    """Prints an error message to stderr and exits with the given code."""
     print(f"bitmath: error: {msg}", file=sys.stderr)
     sys.exit(code)
 
 def _warn(msg: str) -> None:
+    """Prints a warning message to stderr."""
     print(f"bitmath: note: {msg}", file=sys.stderr)
 
 def _read_expr(args: argparse.Namespace) -> str:
+    """Reads the expression from command-line arguments or stdin."""
     if args.expression:
         return args.expression.strip()
     if not sys.stdin.isatty():
@@ -228,6 +233,7 @@ def _read_expr(args: argparse.Namespace) -> str:
 # ── entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
+    """Main entry point for the bitmath CLI."""
     parser = build_parser()
     args   = parser.parse_args()
     expr   = _read_expr(args)

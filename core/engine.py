@@ -26,11 +26,10 @@ The only acceptable imports are: re, math, and the standard library types.
 
 from __future__ import annotations
 
-import math
+import copy
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional
 
 
 # ── enums ─────────────────────────────────────────────────────────────────────
@@ -59,7 +58,7 @@ class Endian(Enum):
 @dataclass
 class FormatSpec:
     """All display options in one place. Mirrors what the CLI parses."""
-    base:         Optional[Base] = None        # None → auto-infer
+    base:         Base | None    = None        # None → auto-infer
     group_mode:   GroupMode      = GroupMode.NONE
     group_n:      int            = 2
     endian:       Endian         = Endian.BIG
@@ -70,7 +69,7 @@ class FormatSpec:
     c_array:      bool           = False
     show_all:     bool           = False       # -A flag
     ascii_out:    bool           = False       # NEW: -a flag (ascii output format)
-    width:        Optional[int]  = None
+    width:        int | None     = None
     signed:       bool           = False
     ascii_decode: bool           = False
     ascii_encode: bool           = False
@@ -156,7 +155,7 @@ def _next_pow2_bytes(bits: int) -> int:
     return p
 
 
-def infer_width(py_expr: str, result: int, override: Optional[int] = None) -> int:
+def infer_width(py_expr: str, result: int, override: int | None = None) -> int:
     """
     Return the display bit-width for `result` given the expression's literals.
     `py_expr` must already be translated (0o / 0b prefixes, not o/b suffixes).
@@ -228,10 +227,12 @@ def fmt_hex(n: int, upper: bool = False, prefix: bool = True) -> str:
 
 
 def fmt_dec(n: int) -> str:
+    """ Format as decimal. Always returns a plain string (no prefix)."""
     return str(n)
 
 
 def fmt_oct(n: int, prefix: bool = True) -> str:
+    """Format as octal. `prefix` controls the 0o leader."""
     return ("0o" if prefix else "") + format(n, "o")
 
 
@@ -258,9 +259,9 @@ def fmt_signed(n: int, width: int) -> str:
     """
     Interpret `n` as a two's-complement signed integer of `width` bits.
     C equivalent: core_fmt_signed() using (int64_t) cast or equivalent.
-      0xff (8-bit) -> -1
-      0x80 (8-bit) -> -128
-      0x7f (8-bit) -> 127
+      0xff (8-bit) → -1
+      0x80 (8-bit) → -128
+      0x7f (8-bit) → 127
     """
     msb_mask = 1 << (width - 1)
     if n & msb_mask:
@@ -268,27 +269,30 @@ def fmt_signed(n: int, width: int) -> str:
     return str(n)
 
 
-def fmt_ascii_decode(n: int, width: int) -> str:
+def fmt_ascii_decode(n: int, width: int, endian: Endian = Endian.BIG) -> str:
     """
     Decode an integer to its ASCII string representation, using all `width` bits.
     Non-printable bytes are rendered as dots (like xxd / strings behaviour).
-    C equivalent: core_fmt_ascii_decode() iterating bytes MSB-first.
-      0x41414141   -> AAAA
-      0x68656c6c6f -> hello  (width=40)
-      0x4865       -> He
-      0x0041       -> .A     (width=16, leading zero byte preserved)
+    C equivalent: core_fmt_ascii_decode() iterating bytes MSB-first (or LSB-first
+    for little -endian).
+      0x414243   → .ABC  (32-bit padded)
+      0x414243   → CBA. (bytes reversed)
+      0x41414141 → AAAA
     """
     byte_len  = (width + 7) // 8
     hex_str   = format(n, f"0{byte_len * 2}x")
     byte_vals = [int(hex_str[i:i+2], 16) for i in range(0, len(hex_str), 2)]
+    if endian == Endian.LITTLE:
+        byte_vals = list(reversed(byte_vals))
     return "".join(chr(b) if 0x20 <= b <= 0x7e else "." for b in byte_vals)
 
 
-def fmt_ascii(n: int, width: int) -> str:
+def fmt_ascii(n: int, width: int, endian: Endian = Endian.BIG) -> str:
     """
     Format integer as ASCII for the -a output flag.
-    Strips leading zero-padding bytes so "hello" stays "hello" even when
-    inferred width is 64-bit.  Non-printable bytes render as dots.
+    Strips leading zero-padding bytes so values like 0x68656c6c6f show as "hello".
+    Non-printable bytes render as dots.
+    Respects endianness: little-endian reverses the byte order before rendering.
     Used by -a (ascii output flag).
     """
     if n == 0:
@@ -296,17 +300,24 @@ def fmt_ascii(n: int, width: int) -> str:
     val_bytes = (n.bit_length() + 7) // 8
     hex_str   = format(n, f"0{val_bytes * 2}x")
     byte_vals = [int(hex_str[i:i+2], 16) for i in range(0, len(hex_str), 2)]
+    if endian == Endian.LITTLE:
+        byte_vals = list(reversed(byte_vals))
     return "".join(chr(b) if 0x20 <= b <= 0x7e else "." for b in byte_vals)
 
 
-def ascii_encode(s: str) -> int:
+def ascii_encode(s: str, endian: Endian = Endian.BIG) -> int:
     """
-    Encode an ASCII string to its integer representation (big-endian).
-    C equivalent: core_ascii_encode() shifting bytes into a uint64_t MSB-first.
-      "AAAA"  -> 0x41414141
-      "hello" -> 0x68656c6c6f
+    Encode an ASCII string to its integer representation.
+    Big-endian: first char in most-significant byte.
+    Little-endian: first char in least-significant byte (reversed).
+    C equivalent: core_ascii_encode()
+      "ABC" big    → 0x414243
+      "ABC" little → 0x434241
     """
-    return int.from_bytes(s.encode("latin-1"), byteorder="big")
+    b = s.encode("latin-1")
+    if endian == Endian.LITTLE:
+        b = bytes(reversed(b))
+    return int.from_bytes(b, byteorder="big")
 
 
 # ── grouped hex helpers ───────────────────────────────────────────────────────
@@ -327,15 +338,7 @@ def _apply_endian(nibbles: list[str], endian: Endian) -> list[str]:
     return [n for p in pairs for n in p]
 
 
-def fmt_grouped(
-    n: int,
-    width: int,
-    mode: GroupMode,
-    group_n: int,
-    endian: Endian  = Endian.BIG,
-    spaces: bool    = False,
-    upper:  bool    = False,
-) -> str:
+def fmt_grouped(n: int, width: int, mode: GroupMode, group_n: int, endian: Endian = Endian.BIG, spaces: bool = False, upper: bool = False) -> str:
     """
     Byte-grouped (-W) or nibble-grouped (-w) hex output.
     mode=BYTE:   group_n is in bytes   → chunk = group_n * 2 nibbles
@@ -376,7 +379,7 @@ def fmt_c_array(n: int, width: int, endian: Endian, upper: bool = False) -> str:
     return "{ " + elems + " }"
 
 
-def fmt_all(n: int, width: int, signed: bool = False, upper: bool = False) -> dict[str, str]:
+def fmt_all(n: int, width: int, signed: bool = False, upper: bool = False, endian: Endian = Endian.BIG) -> dict[str, str]:
     """
     Return an ordered dict of all representations.
     Used by --all / -A mode.
@@ -388,8 +391,8 @@ def fmt_all(n: int, width: int, signed: bool = False, upper: bool = False) -> di
         "dec":   str(n),
         "oct":   "0o" + format(n, "o"),
         "bin":   fmt_bin(n, spaces=True),
-        "bytes": fmt_grouped(n, width, GroupMode.BYTE, 1, spaces=True, upper=upper),
-        "ascii": fmt_ascii_decode(n, width),
+        "bytes": fmt_grouped(n, width, GroupMode.BYTE, 1, endian=endian, spaces=True, upper=upper),
+        "ascii": fmt_ascii_decode(n, width, endian=endian),
     }
     if signed:
         rows["signed"] = fmt_signed(n, width)
@@ -426,13 +429,7 @@ def _parse_hex_key(key_str: str) -> list[int]:
     0x41   → [0x41]
     0x4142 → [0x41, 0x42]
     """
-    val = int(key_str, 16)
-    # determine byte length from the hex string (not the value)
-    hex_digits = key_str[2:].lstrip("0") or "0"
-    # round up to even number of hex digits = full bytes
-    n_bytes = max(1, (len(key_str) - 2 + 1) // 2)
-    # actually use the literal length (strip 0x, round up to byte boundary)
-    raw_hex = key_str[2:]  # e.g. "4142"
+    raw_hex = key_str[2:]  # strip 0x prefix, e.g. "4142"
     if len(raw_hex) % 2 == 1:
         raw_hex = "0" + raw_hex
     return [int(raw_hex[i:i+2], 16) for i in range(0, len(raw_hex), 2)]
@@ -443,11 +440,11 @@ def xor_string(lhs: str, rhs: str) -> str:
     XOR two operands where at least one side is a string.
 
     Supported forms:
-      "hello" ^ 0x5          → XOR every char of "hello" against 0x05
-      "hello" ^ 0x4142       → XOR chars cycling through [0x41, 0x42]
-      "hello" ^ "world"      → XOR each char of lhs against the corresponding
+      "hello" ^ 0x5     → XOR every char of "hello" against 0x05
+      "hello" ^ 0x4142  → XOR chars cycling through [0x41, 0x42]
+      "hello" ^ "world" → XOR each char of lhs against the corresponding
                                char of rhs (cycling if rhs is shorter)
-      0x5 ^ "hello"          → same as "hello" ^ 0x5
+      0x5 ^ "hello"     → same as "hello" ^ 0x5
 
     Returns the result as a hex integer string (e.g. "0x8d...").
     """
@@ -523,6 +520,7 @@ def _looks_like_string_xor(expr: str) -> bool:
     lhs, rhs = parts[0].strip(), parts[1].strip()
     # if both sides are valid integer literals, it's a normal numeric XOR
     def is_num_literal(s: str) -> bool:
+        """Return True if `s` is a valid integer literal (decimal, hex, octal, binary)."""
         s = s.strip()
         try:
             int(s, 0)
@@ -530,8 +528,10 @@ def _looks_like_string_xor(expr: str) -> bool:
         except (ValueError, TypeError):
             pass
         # custom suffixes
-        if re.fullmatch(r"[0-9]+[oO]", s): return True
-        if re.fullmatch(r"[01]+[bB]", s):  return True
+        if re.fullmatch(r"[0-9]+[oO]", s):
+            return True
+        if re.fullmatch(r"[01]+[bB]", s):
+            return True
         return False
     return not (is_num_literal(lhs) and is_num_literal(rhs))
 
@@ -542,7 +542,7 @@ def _looks_like_plain_string(expr: str) -> bool:
     numeric/bitwise expression.  Quoted strings are always strings.  Unquoted
     strings are strings when they contain at least one letter that cannot be
     part of a numeric literal or operator and no numeric-only operator tokens.
-    C equivalent: bm_looks_like_plain_string()
+    C equivalent: core_looks_like_plain_string()
     """
     s = expr.strip()
     # explicitly quoted → always a string
@@ -558,8 +558,10 @@ def _looks_like_plain_string(expr: str) -> bool:
         return False
     except (ValueError, TypeError):
         pass
-    if re.fullmatch(r"[0-9]+[oO]", s): return False
-    if re.fullmatch(r"[01]+[bB]", s):  return False
+    if re.fullmatch(r"[0-9]+[oO]", s):
+        return False
+    if re.fullmatch(r"[01]+[bB]", s):
+        return False
     # contains any letter → it's a string
     return bool(re.search(r"[a-zA-Z]", s))
  
@@ -574,7 +576,7 @@ def _strip_quotes(s: str) -> str:
 
 # ── top-level process() ───────────────────────────────────────────────────────
 
-def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
+def process(expr: str, spec: FormatSpec) -> tuple[str, str | None]:
     """
     Main entry point called by the CLI.
     Returns (output_string, verbose_string_or_None).
@@ -582,31 +584,37 @@ def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
     """
     # ── ascii-encode: string → hex integer ───────────────────────────────────
     if spec.ascii_encode:
-        raw_str = _strip_quotes(expr)
+        raw = _strip_quotes(expr)
         # if the input is a numeric literal, evaluate it first then encode its bytes
-        if not _looks_like_plain_string(raw_str):
+        if not _looks_like_plain_string(raw):
             try:
-                num = evaluate(raw_str)
-                width = infer_width(translate_expr(raw_str), num, override=spec.width)
+                num = evaluate(raw)
+                width = infer_width(translate_expr(raw), num, override=spec.width)
                 n = mask_unsigned(num, width)
-                # re-encode the integer as a byte string then back to int
                 byte_len = width // 8
                 as_bytes = n.to_bytes(byte_len, "big")
+                if spec.endian == Endian.LITTLE:
+                    as_bytes = bytes(reversed(as_bytes))
                 n = int.from_bytes(as_bytes, "big")
                 width = byte_len * 8
                 return _format_result(n, width, Base.HEX, spec), None
             except (ValueError, OverflowError):
                 pass  # fall through to string encode
-        n = ascii_encode(raw_str)
-        width = len(raw_str) * 8
-        return _format_result(n, width, Base.HEX, spec), None
+        n = ascii_encode(raw, endian=spec.endian)
+        width = len(raw) * 8
+        # endian is already baked into n; pass BIG to avoid double-reversing in _format_result
+        fspec = copy.copy(spec)
+        fspec.endian = Endian.BIG
+        return _format_result(n, width, Base.HEX, fspec), None
  
     # ── plain string → encode then format ────────────────────────────────────
     if _looks_like_plain_string(expr):
         raw = _strip_quotes(expr)
-        n   = ascii_encode(raw)
+        n   = ascii_encode(raw, endian=spec.endian)
         width = len(raw) * 8   # exact byte width — no rounding up
-        return _format_result(n, width, Base.HEX, spec), None
+        fspec = copy.copy(spec)
+        fspec.endian = Endian.BIG
+        return _format_result(n, width, Base.HEX, fspec), None
 
     # ── string XOR detection ─────────────────────────────────────────────────
     if _looks_like_string_xor(expr):
@@ -628,10 +636,10 @@ def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
 
     # ── ascii-decode: integer → string ───────────────────────────────────────
     if spec.ascii_decode:
-        return fmt_ascii_decode(n, width), None
+        return fmt_ascii_decode(n, width, endian=spec.endian), None
 
     # ── verbose info ──────────────────────────────────────────────────────────
-    verbose_str: Optional[str] = None
+    verbose_str: str | None = None
     if spec.verbose:
         info = VerboseInfo(
             py_expr=py_expr,
@@ -650,13 +658,13 @@ def _format_result(n: int, width: int, inferred_base: Base, spec: FormatSpec) ->
     """Apply spec formatting to an already-evaluated, masked integer."""
     # ── show all (-A) ─────────────────────────────────────────────────────────
     if spec.show_all:
-        rows = fmt_all(n, width, signed=spec.signed, upper=spec.upper)
+        rows = fmt_all(n, width, signed=spec.signed, upper=spec.upper, endian=spec.endian)
         max_key = max(len(k) for k in rows)
         return "\n".join(f"  {k:<{max_key}}  {v}" for k, v in rows.items())
 
     # ── ascii output (-a) ─────────────────────────────────────────────────────
     if spec.base == Base.ASC or spec.ascii_out:
-        return fmt_ascii(n, width)
+        return fmt_ascii(n, width, endian=spec.endian)
 
     # ── escape sequence ───────────────────────────────────────────────────────
     if spec.escape:
@@ -692,7 +700,7 @@ def _format_result(n: int, width: int, inferred_base: Base, spec: FormatSpec) ->
         # no_prefix has no additional effect here (already no prefix by default)
         return fmt_bin(n, spaces=spec.spaces, prefix=False)
     if base == Base.ASC:
-        return fmt_ascii(n, width)
+        return fmt_ascii(n, width, endian=spec.endian)
 
     # fallback
     return fmt_hex(n, upper=spec.upper, prefix=not spec.no_prefix)
