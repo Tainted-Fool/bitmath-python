@@ -395,7 +395,33 @@ class TestProcess:
     # error
     def test_invalid_expr(self):
         with pytest.raises(ValueError):
-            p("not_valid !!!")
+            p("* *")
+
+    # plain string input
+    def test_plain_string_default_hex(self):
+        assert p("hello") == "0x68656c6c6f"
+        ef test_plain_string_force_bin(self):
+        assert p("hi", base=Base.BIN, spaces=True) == "0110 1000 0110 1001"
+    def test_plain_string_force_dec(self):
+        assert p("A", base=Base.DEC) == "65"
+    def test_plain_string_force_oct(self):
+        assert p("A", base=Base.OCT) == "0o101"
+    def test_plain_string_force_ascii(self):
+        assert p("hello", base=Base.ASC) == "hello"
+    def test_plain_string_show_all(self):
+        out, _ = process("hi", spec(show_all=True))
+        assert "hex" in out and "ascii" in out and "hi" in out
+    def test_plain_string_escape(self):
+        assert p("hi", escape=True) == r"\x68\x69"
+    def test_plain_string_c_array(self):
+        assert p("hi", c_array=True) == "{ 0x68, 0x69 }"
+    def test_plain_string_W1_spaces(self):
+        assert p("hi", group_mode=GroupMode.BYTE, group_n=1, spaces=True) == "68 69"
+    def test_quoted_string(self):
+        assert p('"hello"') == "0x68656c6c6f"
+    def test_quoted_string_with_space(self):
+        assert p('"hello world"') == "0x68656c6c6f20776f726c64"
+
 
 
 # ── fmt_signed in process ─────────────────────────────────────────────────────

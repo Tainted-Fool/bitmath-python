@@ -536,6 +536,42 @@ def _looks_like_string_xor(expr: str) -> bool:
     return not (is_num_literal(lhs) and is_num_literal(rhs))
 
 
+def _looks_like_plain_string(expr: str) -> bool:
+    """
+    Return True if `expr` is a bare or quoted plaintext string rather than a
+    numeric/bitwise expression.  Quoted strings are always strings.  Unquoted
+    strings are strings when they contain at least one letter that cannot be
+    part of a numeric literal or operator and no numeric-only operator tokens.
+    C equivalent: bm_looks_like_plain_string()
+    """
+    s = expr.strip()
+    # explicitly quoted → always a string
+    if (s.startswith('"') and s.endswith('"')) or \
+       (s.startswith("'") and s.endswith("'")):
+        return True
+    # contains any operator characters → not a plain string
+    if re.search(r"[+\-*/<>|&~^]", s):
+        return False
+    # if it parses as a number, it's a number
+    try:
+        int(s, 0)
+        return False
+    except (ValueError, TypeError):
+        pass
+    if re.fullmatch(r"[0-9]+[oO]", s): return False
+    if re.fullmatch(r"[01]+[bB]", s):  return False
+    # contains any letter → it's a string
+    return bool(re.search(r"[a-zA-Z]", s))
+ 
+ 
+def _strip_quotes(s: str) -> str:
+    """Remove surrounding single or double quotes if present."""
+    s = s.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+        return s[1:-1]
+    return s
+
+
 # ── top-level process() ───────────────────────────────────────────────────────
 
 def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
@@ -546,17 +582,31 @@ def process(expr: str, spec: FormatSpec) -> tuple[str, Optional[str]]:
     """
     # ── ascii-encode: string → hex integer ───────────────────────────────────
     if spec.ascii_encode:
-        n = ascii_encode(expr)
-        # format the result
-        if spec.base == Base.HEX or spec.base is None:
-            out = fmt_hex(n, upper=spec.upper, prefix=not spec.no_prefix)
-        elif spec.base == Base.DEC:
-            out = fmt_dec(n)
-        elif spec.base == Base.OCT:
-            out = fmt_oct(n, prefix=not spec.no_prefix)
-        else:
-            out = fmt_bin(n, spaces=spec.spaces, prefix=not spec.no_prefix)
-        return out, None
+        raw_str = _strip_quotes(expr)
+        # if the input is a numeric literal, evaluate it first then encode its bytes
+        if not _looks_like_plain_string(raw_str):
+            try:
+                num = evaluate(raw_str)
+                width = infer_width(translate_expr(raw_str), num, override=spec.width)
+                n = mask_unsigned(num, width)
+                # re-encode the integer as a byte string then back to int
+                byte_len = width // 8
+                as_bytes = n.to_bytes(byte_len, "big")
+                n = int.from_bytes(as_bytes, "big")
+                width = byte_len * 8
+                return _format_result(n, width, Base.HEX, spec), None
+            except (ValueError, OverflowError):
+                pass  # fall through to string encode
+        n = ascii_encode(raw_str)
+        width = len(raw_str) * 8
+        return _format_result(n, width, Base.HEX, spec), None
+ 
+    # ── plain string → encode then format ────────────────────────────────────
+    if _looks_like_plain_string(expr):
+        raw = _strip_quotes(expr)
+        n   = ascii_encode(raw)
+        width = len(raw) * 8   # exact byte width — no rounding up
+        return _format_result(n, width, Base.HEX, spec), None
 
     # ── string XOR detection ─────────────────────────────────────────────────
     if _looks_like_string_xor(expr):
@@ -621,14 +671,16 @@ def _format_result(n: int, width: int, inferred_base: Base, spec: FormatSpec) ->
         return fmt_signed(n, width)
 
     # ── grouped hex (-W / -w / -e little) ────────────────────────────────────
-    if spec.group_mode != GroupMode.NONE or spec.endian == Endian.LITTLE:
-        mode   = spec.group_mode if spec.group_mode != GroupMode.NONE else GroupMode.BYTE
-        gn     = spec.group_n
+    # Only applies when no explicit non-hex base flag was given (-b/-d/-o/-a
+    # take priority over grouping). Inferred base doesn't block grouping.
+    if (spec.group_mode != GroupMode.NONE or spec.endian == Endian.LITTLE) \
+            and spec.base not in (Base.BIN, Base.DEC, Base.OCT, Base.ASC):
+        mode = spec.group_mode if spec.group_mode != GroupMode.NONE else GroupMode.BYTE
+        gn   = spec.group_n
         return fmt_grouped(n, width, mode, gn, spec.endian, spec.spaces, spec.upper)
 
     # ── plain scalar output ───────────────────────────────────────────────────
     base = spec.base if spec.base is not None else inferred_base
-
     if base == Base.HEX:
         return fmt_hex(n, upper=spec.upper, prefix=not spec.no_prefix)
     if base == Base.DEC:
